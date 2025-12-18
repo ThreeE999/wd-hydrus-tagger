@@ -15,7 +15,7 @@
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/your-username/wd-hydrus-tagger.git
+git clone https://github.com/threee999/wd-hydrus-tagger.git
 cd wd-hydrus-tagger
 ```
 
@@ -111,7 +111,7 @@ python run.py
 
 ```bash
 # 拉取最新镜像
-docker pull ghcr.io/your-username/wd-hydrus-tagger:latest
+docker pull ghcr.io/threee999/wd-hydrus-tagger:latest
 
 # 运行容器
 docker run -d \
@@ -120,7 +120,7 @@ docker run -d \
   -v /path/to/logs:/app/logs \
   -v /path/to/models:/app/models \
   --restart unless-stopped \
-  ghcr.io/your-username/wd-hydrus-tagger:latest
+  ghcr.io/threee999/wd-hydrus-tagger:latest
 ```
 
 ### docker-compose.yml 示例
@@ -130,7 +130,7 @@ version: '3.8'
 
 services:
   hydrus-tagger:
-    image: ghcr.io/your-username/wd-hydrus-tagger:latest
+    image: ghcr.io/threee999/wd-hydrus-tagger:latest
     # 或使用本地构建
     # build: .
     volumes:
