@@ -6,10 +6,7 @@
 
 - 🤖 使用 WD14 Tagger 模型自动为 Hydrus 中的图片添加标签
 - ⏰ 支持 crontab 风格的定时调度（如 `*/5 * * * *` 每 5 分钟）
-- 📝 完整的日志系统，自动保存到 `logs/` 目录
 - 🔄 持续运行模式，适合容器化部署
-- 🛡️ 完善的错误处理，单个文件失败不影响整体运行
-- 📊 运行统计功能，记录成功/失败数量
 - 🔥 配置文件热重载，修改 `config.json` 后自动生效，无需重启
 - 🐳 GitHub Actions 自动构建 Docker 镜像
 
@@ -143,41 +140,6 @@ services:
     restart: unless-stopped
 ```
 
-### 本地构建
-
-如果需要本地构建 Docker 镜像：
-
-```bash
-docker build -t hydrus-tagger .
-docker run -d \
-  --name hydrus-tagger \
-  -v $(pwd)/config.json:/app/config.json \
-  -v $(pwd)/logs:/app/logs \
-  -v $(pwd)/models:/app/models \
-  --restart unless-stopped \
-  hydrus-tagger
-```
-
-### GitHub Actions 自动构建
-
-项目已配置 GitHub Actions workflow，在以下情况会自动构建并推送 Docker 镜像：
-
-- 推送到 `main` 分支
-- 创建版本标签（如 `v1.0.0`）
-- 手动触发（workflow_dispatch）
-
-镜像会自动推送到 GitHub Container Registry，标签包括：
-- `latest` - 主分支最新版本
-- `main-<sha>` - 基于 commit SHA
-- `v1.0.0` - 版本标签
-- `1.0` - 主版本号
-- `1` - 大版本号
-
-## 错误处理
-
-- 单个文件处理失败不会影响整体运行
-- 所有错误都会记录到日志文件中
-- 失败的文件不会重试（可在日志中查看）
 
 ## 统计信息
 
@@ -194,7 +156,7 @@ docker run -d \
 - `SmilingWolf/wd-vit-large-tagger-v3`
 - `SmilingWolf/wd-swinv2-tagger-v3`
 - `SmilingWolf/wd-convnext-tagger-v3`
-- 更多模型请参考 [WD14 Tagger](https://github.com/toriato/stable-diffusion-webui-wd14-tagger)
+- 更多模型请参考 [WD Tagger](https://huggingface.co/SmilingWolf)
 
 ## 许可证
 
