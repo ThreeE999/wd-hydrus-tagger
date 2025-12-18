@@ -3,6 +3,8 @@ import os
 import signal
 import sys
 import time
+import multiprocessing
+import gc
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -23,6 +25,9 @@ stats = {
     "last_run": None,
     "next_run": None
 }
+
+# 全局变量用于进程管理
+current_worker_process = None
 
 
 def load_config(config_path="config.json"):
@@ -125,17 +130,127 @@ def hydrus_add_tags(predictor: app.Predictor, client: hydrus_api.Client, file_id
         return False
 
 
+def worker_process(task_queue, result_queue, config_dict):
+    """
+    子进程工作函数：在独立进程中加载模型并处理预测任务
+    这样可以确保任务完成后模型内存完全释放回操作系统
+    """
+    import logging
+    import sys
+    import hydrus_api
+    from io import BytesIO
+    from PIL import Image
+    
+    def format_tags(response, ai_tag_name):
+        """格式化标签（子进程版本）"""
+        tags = []
+        tags.append(f'rating:{max(response[1], key=response[1].get)}')
+        tags.extend(map(lambda x: f'character:{x}', response[2].keys()))
+        tags.extend(response[3].keys())
+        tags.append(ai_tag_name)
+        return tags
+    
+    # 在子进程中设置日志
+    logger = logging.getLogger("hydrus_tagger_worker")
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+    
+    try:
+        # 在子进程中初始化 Predictor（模型会在这里加载）
+        predictor = app.Predictor()
+        logger.info("子进程：模型加载完成")
+        
+        # 初始化 Hydrus 客户端
+        hydrus_config = config_dict["hydrus"]
+        client = hydrus_api.Client(hydrus_config["api_key"], hydrus_config["host"])
+        
+        # 获取服务密钥
+        service_key = client.get_service(hydrus_config["tag_service"])['service']['service_key']
+        
+        # 处理任务队列中的文件
+        success_count = 0
+        failed_count = 0
+        
+        while True:
+            # 从任务队列获取文件ID
+            try:
+                task = task_queue.get(timeout=1)
+                if task is None:  # 结束信号
+                    break
+                
+                file_id = task
+                
+                # 处理单个文件
+                try:
+                    image_bytes = BytesIO(client.get_file(file_id=file_id).content)
+                    image = Image.open(image_bytes)
+                    image = image.convert("RGBA")
+                    
+                    model_config = config_dict["model"]
+                    response = predictor.predict(
+                        image=image,
+                        model_repo=model_config["repo"],
+                        general_thresh=model_config["general_thresh"],
+                        general_mcut_enabled=model_config["general_mcut_enabled"],
+                        character_thresh=model_config["character_thresh"],
+                        character_mcut_enabled=model_config["character_mcut_enabled"],
+                    )
+                    
+                    ai_tag_name = f"{model_config['repo']} ai tags"
+                    tags = format_tags(response, ai_tag_name)
+                    client.add_tags(file_ids=[file_id], service_keys_to_tags={
+                        service_key: tags
+                    })
+                    
+                    # 发送成功结果
+                    result_queue.put(("success", file_id))
+                    success_count += 1
+                    
+                except Exception as e:
+                    logger.error(f"处理文件 {file_id} 时出错: {str(e)}", exc_info=True)
+                    result_queue.put(("failed", file_id))
+                    failed_count += 1
+                    
+            except:
+                # 超时或其他错误，继续循环
+                continue
+        
+        # 清理资源
+        del predictor
+        del client
+        gc.collect()
+        
+        logger.info(f"子进程：任务完成，成功 {success_count}，失败 {failed_count}")
+        result_queue.put(("done", {"success": success_count, "failed": failed_count}))
+        
+    except Exception as e:
+        logger.error(f"子进程发生错误: {str(e)}", exc_info=True)
+        result_queue.put(("error", str(e)))
+    finally:
+        # 确保资源清理
+        gc.collect()
+        logger.info("子进程退出，内存已释放")
+
+
 def run_task(config, logger):
-    """执行一次标签任务"""
-    global stats, shutdown_flag
+    """执行一次标签任务（使用子进程隔离模型内存）"""
+    global stats, shutdown_flag, current_worker_process
     
     logger.info("=" * 60)
     logger.info("开始执行标签任务")
     stats["last_run"] = datetime.now().isoformat()
     
+    # 检查是否有正在运行的子进程，如果有则直接跳过本次任务
+    if current_worker_process is not None and current_worker_process.is_alive():
+        logger.warning("检测到正在运行的子进程，跳过本次任务执行")
+        logger.info("=" * 60)
+        return
+    
     try:
-        # 初始化
-        predictor = app.Predictor()
+        # 初始化 Hydrus 客户端（在主进程中）
         hydrus_config = config["hydrus"]
         client = hydrus_api.Client(hydrus_config["api_key"], hydrus_config["host"])
         
@@ -162,26 +277,112 @@ def run_task(config, logger):
             logger.info("没有需要处理的文件")
             return
         
-        # 获取服务密钥
-        try:
-            service_key = client.get_service(hydrus_config["tag_service"])['service']['service_key']
-        except Exception as e:
-            logger.error(f"获取服务密钥失败: {str(e)}", exc_info=True)
-            return
+        # 创建进程间通信队列
+        task_queue = multiprocessing.Queue()
+        result_queue = multiprocessing.Queue()
         
-        # 处理文件
+        # 将文件ID放入任务队列
+        for file_id in file_ids:
+            if shutdown_flag:
+                logger.warning("收到关闭信号，停止添加任务")
+                break
+            task_queue.put(file_id)
+        
+        # 发送结束信号
+        task_queue.put(None)
+        
+        # 启动子进程（模型将在子进程中加载）
+        logger.info("启动子进程处理预测任务（模型将在子进程中加载）")
+        current_worker_process = multiprocessing.Process(
+            target=worker_process,
+            args=(task_queue, result_queue, config)
+        )
+        current_worker_process.start()
+        
+        # 监控子进程并收集结果
         success_count = 0
         failed_count = 0
+        processed_count = 0
+        done_received = False
         
-        for file_id in tqdm(file_ids, desc="处理文件", disable=not sys.stdout.isatty()):
+        # 使用 tqdm 显示进度（如果支持）
+        pbar = tqdm(total=total_files, desc="处理文件", disable=not sys.stdout.isatty())
+        
+        while processed_count < total_files and not done_received:
             if shutdown_flag:
-                logger.warning("收到关闭信号，停止处理")
+                logger.warning("收到关闭信号，终止子进程")
+                if current_worker_process.is_alive():
+                    current_worker_process.terminate()
+                    current_worker_process.join(timeout=10)
+                    if current_worker_process.is_alive():
+                        current_worker_process.kill()
+                        current_worker_process.join()
                 break
             
-            if hydrus_add_tags(predictor, client, file_id, service_key, config, logger):
-                success_count += 1
-            else:
-                failed_count += 1
+            try:
+                # 检查子进程是否还活着
+                if not current_worker_process.is_alive():
+                    # 子进程异常退出，尝试获取剩余结果
+                    logger.warning("子进程异常退出")
+                    break
+                
+                # 从结果队列获取结果（非阻塞）
+                try:
+                    result_type, result_data = result_queue.get(timeout=1)
+                    
+                    if result_type == "success":
+                        success_count += 1
+                        processed_count += 1
+                        pbar.update(1)
+                    elif result_type == "failed":
+                        failed_count += 1
+                        processed_count += 1
+                        pbar.update(1)
+                    elif result_type == "done":
+                        done_received = True
+                        worker_stats = result_data
+                        # 如果子进程统计与我们的统计不一致，使用子进程的统计
+                        if worker_stats.get("success", 0) != success_count or worker_stats.get("failed", 0) != failed_count:
+                            logger.warning(f"统计不一致，使用子进程统计: {worker_stats}")
+                            success_count = worker_stats.get("success", success_count)
+                            failed_count = worker_stats.get("failed", failed_count)
+                    elif result_type == "error":
+                        logger.error(f"子进程报告错误: {result_data}")
+                        break
+                        
+                except:
+                    # 超时，继续检查
+                    continue
+                    
+            except Exception as e:
+                logger.error(f"处理结果时出错: {str(e)}", exc_info=True)
+                break
+        
+        pbar.close()
+        
+        # 等待子进程完成
+        if current_worker_process.is_alive():
+            logger.info("等待子进程完成...")
+            current_worker_process.join(timeout=300)  # 最多等待5分钟
+            if current_worker_process.is_alive():
+                logger.warning("子进程未在预期时间内完成，强制终止")
+                current_worker_process.terminate()
+                current_worker_process.join(timeout=10)
+                if current_worker_process.is_alive():
+                    current_worker_process.kill()
+                    current_worker_process.join()
+        
+        # 清理进程引用
+        current_worker_process = None
+        
+        # 清理队列
+        try:
+            while not task_queue.empty():
+                task_queue.get_nowait()
+            while not result_queue.empty():
+                result_queue.get_nowait()
+        except:
+            pass
         
         # 更新统计
         stats["total_processed"] += total_files
@@ -190,16 +391,26 @@ def run_task(config, logger):
         
         logger.info(f"任务完成: 成功 {success_count}, 失败 {failed_count}, 总计 {total_files}")
         logger.info(f"累计统计: 总处理 {stats['total_processed']}, 成功 {stats['success']}, 失败 {stats['failed']}")
+        logger.info("子进程已退出，模型内存已释放回操作系统")
         
     except Exception as e:
         logger.error(f"执行任务时发生错误: {str(e)}", exc_info=True)
+        # 确保清理子进程
+        if current_worker_process is not None and current_worker_process.is_alive():
+            logger.warning("清理异常子进程")
+            current_worker_process.terminate()
+            current_worker_process.join(timeout=10)
+            if current_worker_process.is_alive():
+                current_worker_process.kill()
+                current_worker_process.join()
+            current_worker_process = None
     finally:
         logger.info("=" * 60)
 
 
 def signal_handler(signum, frame):
     """信号处理器，用于优雅关闭"""
-    global shutdown_flag
+    global shutdown_flag, current_worker_process
     import logging
     logger = logging.getLogger("hydrus_tagger")
     if logger.handlers:  # 只有在 logger 已初始化时才记录
@@ -207,6 +418,16 @@ def signal_handler(signum, frame):
     else:
         print(f"收到信号 {signum}，准备优雅关闭...")
     shutdown_flag = True
+    
+    # 如果子进程正在运行，尝试优雅终止
+    if current_worker_process is not None and current_worker_process.is_alive():
+        logger.info("终止正在运行的子进程...")
+        current_worker_process.terminate()
+        current_worker_process.join(timeout=10)
+        if current_worker_process.is_alive():
+            logger.warning("子进程未响应，强制终止")
+            current_worker_process.kill()
+            current_worker_process.join()
 
 
 def reload_config(config_path="config.json", logger=None):
