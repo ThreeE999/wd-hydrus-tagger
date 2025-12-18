@@ -8,9 +8,9 @@
   "model": {
     "repo": "SmilingWolf/wd-eva02-large-tagger-v3",
     "general_thresh": 0.35,
-    "general_mcut_enabled": true,
+    "general_mcut_enabled": false,
     "character_thresh": 0.85,
-    "character_mcut_enabled": true
+    "character_mcut_enabled": false
   },
   "search_tags": [
     "system:archive",

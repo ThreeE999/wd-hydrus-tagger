@@ -10,6 +10,8 @@
 - 🔄 持续运行模式，适合容器化部署
 - 🛡️ 完善的错误处理，单个文件失败不影响整体运行
 - 📊 运行统计功能，记录成功/失败数量
+- 🔥 配置文件热重载，修改 `config.json` 后自动生效，无需重启
+- 🐳 GitHub Actions 自动构建 Docker 镜像
 
 ## 安装
 
@@ -65,6 +67,16 @@ python run.py
 
 程序会持续运行，按照配置的 crontab 表达式定时执行标签任务。
 
+### 配置文件热重载
+
+程序支持配置文件热重载功能。修改 `config.json` 后，程序会自动检测并重新加载配置，无需重启。支持以下配置的动态更新：
+
+- 调度表达式（schedule）
+- 日志级别（logging.level）
+- 其他所有配置项
+
+修改配置文件后，程序会在 10 秒内检测到变化并自动重载，相关日志会记录在日志文件中。
+
 ## Crontab 表达式说明
 
 使用标准的 crontab 格式：`分 时 日 月 周`
@@ -96,19 +108,22 @@ python run.py
 
 ## 容器化运行
 
-### Dockerfile 示例
+### 使用 GitHub Container Registry 镜像
 
-```dockerfile
-FROM python:3.10-slim
+项目已配置 GitHub Actions 自动构建 Docker 镜像并推送到 GitHub Container Registry (ghcr.io)。
 
-WORKDIR /app
+```bash
+# 拉取最新镜像
+docker pull ghcr.io/your-username/wd-hydrus-tagger:latest
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-CMD ["python", "run.py"]
+# 运行容器
+docker run -d \
+  --name hydrus-tagger \
+  -v /path/to/config.json:/app/config.json \
+  -v /path/to/logs:/app/logs \
+  -v /path/to/models:/app/models \
+  --restart unless-stopped \
+  ghcr.io/your-username/wd-hydrus-tagger:latest
 ```
 
 ### docker-compose.yml 示例
@@ -118,7 +133,9 @@ version: '3.8'
 
 services:
   hydrus-tagger:
-    build: .
+    image: ghcr.io/your-username/wd-hydrus-tagger:latest
+    # 或使用本地构建
+    # build: .
     volumes:
       - ./config.json:/app/config.json
       - ./logs:/app/logs
@@ -126,14 +143,35 @@ services:
     restart: unless-stopped
 ```
 
-## 优雅关闭
+### 本地构建
 
-程序支持优雅关闭，可以通过以下方式停止：
+如果需要本地构建 Docker 镜像：
 
-- 发送 `SIGTERM` 信号（容器环境）
-- 发送 `SIGINT` 信号（Ctrl+C）
+```bash
+docker build -t hydrus-tagger .
+docker run -d \
+  --name hydrus-tagger \
+  -v $(pwd)/config.json:/app/config.json \
+  -v $(pwd)/logs:/app/logs \
+  -v $(pwd)/models:/app/models \
+  --restart unless-stopped \
+  hydrus-tagger
+```
 
-程序会等待当前任务完成后退出。
+### GitHub Actions 自动构建
+
+项目已配置 GitHub Actions workflow，在以下情况会自动构建并推送 Docker 镜像：
+
+- 推送到 `main` 分支
+- 创建版本标签（如 `v1.0.0`）
+- 手动触发（workflow_dispatch）
+
+镜像会自动推送到 GitHub Container Registry，标签包括：
+- `latest` - 主分支最新版本
+- `main-<sha>` - 基于 commit SHA
+- `v1.0.0` - 版本标签
+- `1.0` - 主版本号
+- `1` - 大版本号
 
 ## 错误处理
 
@@ -152,9 +190,7 @@ services:
 
 ## 模型
 
-默认使用 `SmilingWolf/wd-eva02-large-tagger-v3` 模型。支持的模型包括：
-
-- `SmilingWolf/wd-eva02-large-tagger-v3` (推荐)
+- `SmilingWolf/wd-eva02-large-tagger-v3`
 - `SmilingWolf/wd-vit-large-tagger-v3`
 - `SmilingWolf/wd-swinv2-tagger-v3`
 - `SmilingWolf/wd-convnext-tagger-v3`
@@ -164,7 +200,4 @@ services:
 
 MIT License
 
-## 贡献
-
-欢迎提交 Issue 和 Pull Request！
 

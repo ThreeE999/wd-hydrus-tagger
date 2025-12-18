@@ -36,6 +36,13 @@ def load_config(config_path="config.json"):
     return config
 
 
+def get_config_mtime(config_path="config.json"):
+    """获取配置文件的修改时间"""
+    if os.path.exists(config_path):
+        return os.path.getmtime(config_path)
+    return None
+
+
 def setup_logging(config):
     """设置日志系统"""
     import logging
@@ -202,6 +209,19 @@ def signal_handler(signum, frame):
     shutdown_flag = True
 
 
+def reload_config(config_path="config.json", logger=None):
+    """重新加载配置并返回新的配置对象"""
+    try:
+        new_config = load_config(config_path)
+        if logger:
+            logger.info("配置文件已重新加载")
+        return new_config
+    except Exception as e:
+        if logger:
+            logger.error(f"重新加载配置失败: {e}", exc_info=True)
+        return None
+
+
 def main():
     """主函数，实现定时循环运行"""
     global shutdown_flag, stats
@@ -223,6 +243,10 @@ def main():
     logger.info(f"配置文件: config.json")
     logger.info(f"调度表达式: {config['schedule']}")
     
+    # 记录配置文件修改时间
+    config_path = "config.json"
+    last_config_mtime = get_config_mtime(config_path)
+    
     # 解析 crontab 表达式
     try:
         cron = croniter(config["schedule"], datetime.now())
@@ -237,9 +261,40 @@ def main():
     
     # 主循环
     logger.info("进入主循环，等待执行时间...")
+    logger.info("配置文件监控已启用，修改 config.json 后会自动重载")
     
     while not shutdown_flag:
         current_time = datetime.now()
+        
+        # 检查配置文件是否更新
+        current_config_mtime = get_config_mtime(config_path)
+        if current_config_mtime and current_config_mtime != last_config_mtime:
+            logger.info("检测到配置文件更新，正在重新加载...")
+            new_config = reload_config(config_path, logger)
+            if new_config:
+                # 检查调度表达式是否改变
+                if new_config.get("schedule") != config.get("schedule"):
+                    try:
+                        cron = croniter(new_config["schedule"], current_time)
+                        next_run_time = cron.get_next(datetime)
+                        stats["next_run"] = next_run_time.isoformat()
+                        logger.info(f"调度表达式已更新: {new_config['schedule']}")
+                        logger.info(f"下次运行时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                    except Exception as e:
+                        logger.error(f"无效的 crontab 表达式: {new_config['schedule']}, 错误: {e}")
+                        logger.warning("保持使用旧的调度表达式")
+                
+                # 检查日志配置是否改变
+                old_log_level = config.get("logging", {}).get("level", "INFO")
+                new_log_level = new_config.get("logging", {}).get("level", "INFO")
+                if old_log_level != new_log_level:
+                    logger.info(f"日志级别已更新: {old_log_level} -> {new_log_level}")
+                    logger = setup_logging(new_config)
+                
+                # 更新配置
+                config = new_config
+                last_config_mtime = current_config_mtime
+                logger.info("配置重载完成")
         
         # 检查是否到达执行时间
         if current_time >= next_run_time:
