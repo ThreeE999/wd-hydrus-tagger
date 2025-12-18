@@ -1,0 +1,25 @@
+{
+  "schedule": "*/5 * * * *",
+  "hydrus": {
+    "host": "http://localhost:45869",
+    "api_key": "your_api_key_here",
+    "tag_service": "wd14"
+  },
+  "model": {
+    "repo": "SmilingWolf/wd-eva02-large-tagger-v3",
+    "general_thresh": 0.35,
+    "general_mcut_enabled": true,
+    "character_thresh": 0.85,
+    "character_mcut_enabled": true
+  },
+  "search_tags": [
+    "system:archive",
+    "system:filetype = image/jpg, image/png",
+    "system:limit = 100"
+  ],
+  "logging": {
+    "level": "INFO",
+    "log_dir": "logs"
+  }
+}
+
