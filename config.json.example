@@ -5,21 +5,34 @@
     "api_key": "your_api_key_here",
     "tag_service": "wd14"
   },
-  "model": {
-    "repo": "SmilingWolf/wd-eva02-large-tagger-v3",
-    "general_thresh": 0.35,
-    "general_mcut_enabled": false,
-    "character_thresh": 0.85,
-    "character_mcut_enabled": false
+  "tagger": {
+    "enabled": true,
+    "search_tags": [
+      "system:archive",
+      "system:filetype = image/jpg, image/png",
+      "system:limit = 100"
+    ],
+    "model": {
+      "repo": "SmilingWolf/wd-eva02-large-tagger-v3",
+      "general_thresh": 0.35,
+      "general_mcut_enabled": false,
+      "character_thresh": 0.85,
+      "character_mcut_enabled": false
+    }
   },
-  "search_tags": [
-    "system:archive",
-    "system:filetype = image/jpg, image/png",
-    "system:limit = 100"
-  ],
+  "classification": {
+    "enabled": false,
+    "search_tags": [
+      "system:archive",
+      "system:filetype = image/jpg, image/png",
+      "system:limit = 100"
+    ],
+    "repo": "deepghs/anime_classification",
+    "model_name": "mobilenetv3_v1.5_dist",
+    "imgsize": 384
+  },
   "logging": {
     "level": "INFO",
     "log_dir": "logs"
   }
 }
-

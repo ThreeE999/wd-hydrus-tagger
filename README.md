@@ -1,14 +1,14 @@
 # Hydrus Tagger
 
-一个基于 WD14 Tagger 的 Hydrus 图片自动标签工具，支持定时持续运行。
+一个基于 WD14 Tagger / anime classification 的 Hydrus 图片自动标签工具，支持定时持续运行。
 
 ## 功能特性
 
-- 🤖 使用 WD14 Tagger 模型自动为 Hydrus 中的图片添加标签
-- ⏰ 支持 crontab 风格的定时调度（如 `*/5 * * * *` 每 5 分钟）
-- 🔄 持续运行模式，适合容器化部署
-- 🔥 配置文件热重载，修改 `config.json` 后自动生效，无需重启
-- 🐳 GitHub Actions 自动构建 Docker 镜像
+- 使用 WD14 Tagger 为 Hydrus 图片添加标签
+- 可选启用 anime classification，写入 `type:<label>`
+- tagger / classification 可独立开关，并各自配置 `search_tags`
+- 支持 crontab 风格定时调度与配置热重载
+- 适合容器化部署；GitHub Actions 自动构建 Docker 镜像
 
 ## 安装
 
@@ -41,20 +41,17 @@ cp config.json.example config.json
   - `0 * * * *` - 每小时
   - `0 */2 * * *` - 每 2 小时
   - `0 0 * * *` - 每天午夜
-- **hydrus**: Hydrus API 配置
-  - `host`: Hydrus 服务器地址
-  - `api_key`: API 密钥
-  - `tag_service`: 标签服务名称
-- **model**: 模型配置
-  - `repo`: 模型仓库名称
-  - `general_thresh`: 通用标签阈值
-  - `character_thresh`: 角色标签阈值
-  - `general_mcut_enabled`: 是否启用 MCut 阈值
-  - `character_mcut_enabled`: 是否启用角色 MCut 阈值
-- **search_tags**: 搜索标签列表
-- **logging**: 日志配置
-  - `level`: 日志级别 (DEBUG, INFO, WARNING, ERROR)
-  - `log_dir`: 日志目录
+- **hydrus**: Hydrus API 配置（`host` / `api_key` / `tag_service`）
+- **tagger**: WD14 打标任务
+  - `enabled`: 是否启用
+  - `search_tags`: 仅作用于本任务的搜索范围
+  - `model`: `repo` / 阈值 / MCut 开关
+- **classification**: 图片类型分类任务（可选）
+  - `enabled`: 是否启用
+  - `search_tags`: 仅作用于本任务的搜索范围
+  - `repo` / `model_name` / `imgsize`
+  - 写入 `type:<最高分类>`，完成标记为 `{repo}/{model_name} ai tags`
+- **logging**: `level` / `log_dir`
 
 ### 4. 运行
 

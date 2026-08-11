@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  hydrus-tagger:
+    image: ghcr.io/threee999/wd-hydrus-tagger:latest
+    volumes:
+      - /share/DataSSD/projects/wd-hydrus-tagger/config.json:/app/config.json
+      - /share/DataSSD/projects/wd-hydrus-tagger/logs:/app/logs
+      - /share/DataSSD/projects/wd-hydrus-tagger/models:/app/models
+    restart: unless-stopped
+    networks:
+      my_network:
+        ipv4_address: 172.88.0.30
+networks:
+  my_network:
+    external: true
