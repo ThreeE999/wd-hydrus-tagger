@@ -169,7 +169,7 @@ def resolve_enabled_jobs(config):
                 "search_tags": classification["search_tags"],
                 "repo": classification["repo"],
                 "model_name": classification["model_name"],
-                "imgsize": classification.get("imgsize", 384),
+                "pre_long_side": classification.get("pre_long_side", 128),
             }
         )
 
@@ -225,7 +225,7 @@ def _predict_tags_for_file(file_id, client, job, model, done_tag):
             image=image,
             repo=job["repo"],
             model_name=job["model_name"],
-            imgsize=job.get("imgsize", 384),
+            pre_long_side=job.get("pre_long_side", 128),
         )
         return format_classification_tags(scores, done_tag)
 

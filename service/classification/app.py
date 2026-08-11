@@ -31,13 +31,41 @@ def _open_onnx_session(model_path: str) -> rt.InferenceSession:
     return rt.InferenceSession(model_path, options, [provider])
 
 
+_PRE_DOWNSCALE_LONG_SIDE = 128
+
+
+def _shrink_long_side(
+    image: Image.Image,
+    target_long_side: int,
+    resample=Image.Resampling.BILINEAR,
+) -> Image.Image:
+    """按长边等比缩小到 target_long_side；已更小则原样返回。"""
+    w, h = image.size
+    long_side = max(w, h)
+    if long_side <= target_long_side:
+        return image
+    scale = target_long_side / float(long_side)
+    return image.resize(
+        (max(1, round(w * scale)), max(1, round(h * scale))),
+        resample,
+    )
+
+
 def _img_encode(
     image: Image.Image,
     size: Tuple[int, int] = (384, 384),
     normalize: Optional[Tuple[float, float]] = (0.5, 0.5),
+    pre_long_side: int = _PRE_DOWNSCALE_LONG_SIDE,
 ) -> np.ndarray:
-    """Resize to size, RGB CHW float32 in [0, 1], then optional mean/std normalize."""
-    image = image.convert("RGB").resize(size, Image.BILINEAR)
+    """先缩小再拉伸到模型尺寸，RGB CHW float32，再可选归一化。
+
+    1) 长边缩到约 pre_long_side（默认见 _PRE_DOWNSCALE_LONG_SIDE，保比例）
+    2) 再拉伸到 size（由模型 input shape 决定，通常 384x384）
+    """
+    image = image.convert("RGB")
+    if pre_long_side:
+        image = _shrink_long_side(image, pre_long_side, Image.Resampling.BILINEAR)
+    image = image.resize(size, Image.Resampling.BILINEAR)
     data = np.asarray(image, dtype=np.float32).transpose(2, 0, 1) / 255.0
 
     if normalize is not None:
@@ -56,15 +84,11 @@ class ImageTypeClassifier:
         self.model = None
         self.labels = None
         self.last_loaded_key = None
+        self.model_input_size = (384, 384)
 
     def _resolve_paths(self, repo: str, model_name: str) -> Tuple[str, str]:
         if FORCE_LOCAL_FILE:
-            model_dir = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                "models",
-                repo,
-                model_name,
-            )
+            model_dir = os.path.join("models", repo, model_name)
             model_path = os.path.join(model_dir, MODEL_FILENAME)
             meta_path = os.path.join(model_dir, META_FILENAME)
             if os.path.isfile(model_path) and os.path.isfile(meta_path):
@@ -94,6 +118,11 @@ class ImageTypeClassifier:
             labels = json.load(f)["labels"]
 
         self.model = _open_onnx_session(model_path)
+        _, _, height, width = self.model.get_inputs()[0].shape
+        if isinstance(height, int) and isinstance(width, int):
+            self.model_input_size = (width, height)
+        else:
+            self.model_input_size = (384, 384)
         self.labels = labels
         self.last_loaded_key = key
 
@@ -102,7 +131,7 @@ class ImageTypeClassifier:
         image,
         repo: str,
         model_name: str,
-        imgsize: int = 384,
+        pre_long_side: int = _PRE_DOWNSCALE_LONG_SIDE,
     ) -> dict:
         """Return mapping of class label -> score."""
         self.load_model(repo, model_name)
@@ -116,7 +145,11 @@ class ImageTypeClassifier:
         else:
             image = image.convert("RGB")
 
-        input_ = _img_encode(image, size=(imgsize, imgsize))[None, ...]
+        input_ = _img_encode(
+            image,
+            size=self.model_input_size,
+            pre_long_side=pre_long_side,
+        )[None, ...]
         output, = self.model.run(["output"], {"input": input_})
         return dict(zip(self.labels, map(lambda x: float(x.item()), output[0])))
 
@@ -126,7 +159,6 @@ if __name__ == "__main__":
     import sys
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-
     parser = argparse.ArgumentParser(description="单文件图片类型分类测试")
     parser.add_argument("image", help="图片路径")
     parser.add_argument(
@@ -136,10 +168,15 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--model",
-        default="mobilenetv3_v1.5_dist",
+        default="mobilenetv3_v1.4_dist",
         help="模型变体名",
     )
-    parser.add_argument("--imgsize", type=int, default=384, help="推理尺寸")
+    parser.add_argument(
+        "--pre-long-side",
+        type=int,
+        default=_PRE_DOWNSCALE_LONG_SIDE,
+        help="预缩小长边像素（先缩小再拉伸到模型输入）",
+    )
     args = parser.parse_args()
 
     if not os.path.isfile(args.image):
@@ -151,7 +188,7 @@ if __name__ == "__main__":
         image=args.image,
         repo=args.repo,
         model_name=args.model,
-        imgsize=args.imgsize,
+        pre_long_side=args.pre_long_side,
     )
     best = max(scores, key=scores.get)
     print(f"image: {args.image}")

@@ -91,7 +91,7 @@ class Predictor:
 
     def download_model(self, model_repo):
         if FORCE_LOCAL_FILE:
-            model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", model_repo)
+            model_dir = os.path.join("models", model_repo)
             csv_path = os.path.join(model_dir, LABEL_FILENAME)
             model_path = os.path.join(model_dir, MODEL_FILENAME)
         else:

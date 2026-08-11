@@ -49,7 +49,7 @@ cp config.json.example config.json
 - **classification**: 图片类型分类任务（可选）
   - `enabled`: 是否启用
   - `search_tags`: 仅作用于本任务的搜索范围
-  - `repo` / `model_name` / `imgsize`
+  - `repo` / `model_name` / `pre_long_side`（预缩小长边，先缩小再拉到模型输入）
   - 写入 `type:<最高分类>`，完成标记为 `{repo}/{model_name} ai tags`
 - **logging**: `level` / `log_dir`
 

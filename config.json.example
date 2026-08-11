@@ -29,7 +29,7 @@
     ],
     "repo": "deepghs/anime_classification",
     "model_name": "mobilenetv3_v1.5_dist",
-    "imgsize": 384
+    "pre_long_side": 128
   },
   "logging": {
     "level": "INFO",
